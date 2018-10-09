@@ -1,6 +1,7 @@
 package com.fy.sqlparam.impl;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -15,8 +16,7 @@ import com.fy.sqlparam.map.ISqlPart;
 import com.fy.sqlparam.param.ISqlParameter;
 import com.fy.sqlparam.param.ISqlParameterContext;
 import com.fy.sqlparam.param.ISqlQuery;
-import com.fy.sqlparam.param.ISqlQuery.SqlQueryRelation;
-import com.fy.sqlparam.param.ISqlQueryIndex;
+import com.fy.sqlparam.param.ISqlQueryGroup;
 import com.fy.sqlparam.param.ISqlQueryMethod;
 import com.fy.sqlparam.param.ISqlQueryStrategy;
 import com.fy.sqlparam.util.FormatUtils;
@@ -88,39 +88,40 @@ public class SqlParameter implements ISqlParameter {
 	 * <br/> 使用{@link Query}来构建查询条件, 例如: <p><code>parameter.query(Query.to("foo").eq("bar"));</code></p>
 	 */
 	@Override
-	public ISqlQueryIndex query(ISqlQuery query) {
+	public ISqlQuery query(ISqlQuery query) {
 		if(query == null) {
 			throw new IllegalArgumentException("添加的查询条件不能为null");
 		}
 		SqlQuery queryReal = ((SqlQuery) query);
+		// 未产生第一个条件的情况下
 		if(this.conditions == null) {
-			if(query instanceof SqlQueryGroup) {
-				this.conditions = (SqlQueryGroup) query;
-				return this.conditions.index;
+			// 找到传入查询实例的根, 生成查询条件总的组
+			while(queryReal.belongGroup != null) {
+				queryReal = queryReal.belongGroup;
 			}
-			this.conditions = new SqlQueryGroup(query);
-			return queryReal.index;
+			this.conditions = new SqlQueryGroup(queryReal);
+			return this.conditions;
 		}
-		queryReal.relation = SqlQueryRelation.AND;
-		this.conditions.add(query);
-		return queryReal.index;
+		// 不是第一个就直接加入即可
+		this.conditions.and(query); /* 默认使用AND连接 */
+		return this.conditions;
 	}
-
+	
 	@Override
-	public ISqlQueryIndex markOrderBy(String propertyName, boolean isAsc) {
+	public ISqlQuery markOrderBy(String propertyName, boolean isAsc) {
 		SqlQuery query = new SqlQuery(propertyName, 
 				SqlQueryStrategy.ORDER_BY.instance(),
 				Boolean.valueOf(isAsc));
 		if(this.sorts == null) {
 			this.sorts = new SqlQueryGroup(query);
-			return query.index;
+			return query;
 		}
-		this.sorts.add(query);
-		return query.index;
+		this.sorts.addQuery(query);
+		return query;
 	}
 
 	@Override
-	public ISqlQueryIndex setPagination(int page, int count, int offset) {
+	public ISqlQuery setPagination(int page, int count, int offset) {
 		page = page < 1 ? 1 : page;
 		count = count < 0 ? 10 : count;
 		offset = offset < 0 ? 0 : offset;
@@ -129,16 +130,19 @@ public class SqlParameter implements ISqlParameter {
 		this.limit = new SqlQuery(null,
 				SqlQueryStrategy.LIMIT.instance(),
 				Integer.valueOf(start), Integer.valueOf(count)); /* 只有一个LIMIT */
-		return this.limit.index;
+		return this.limit;
 	}
 	
 	@Override
-	public void deleteQuery(ISqlQueryIndex queryIndex) {
-		if(queryIndex == null) {
+	public void deleteQuery(ISqlQuery query) {
+		if(query == null) {
 			throw new IllegalArgumentException("删除的查询条件不能为null");
 		}
-		SqlQuery queryReal = (SqlQuery) queryIndex.getQuery();
-		queryReal.belongGroup.groupQueries.remove(queryReal);
+		SqlQuery queryReal = (SqlQuery) query;
+		if(queryReal.belongGroup == null) {
+			throw new IllegalArgumentException("删除的查询条件未加入此查询上下文");
+		}
+		queryReal.belongGroup.removeQuery(queryReal);
 	}
 	
 	@Override
@@ -373,14 +377,6 @@ public class SqlParameter implements ISqlParameter {
 		 * @author linjie
 		 * @since 1.0.0
 		 */
-		final SqlQueryIndex index;
-		
-		/**
-		 * 查询的属性名称
-		 * 
-		 * @author linjie
-		 * @since 1.0.0
-		 */
 		private final String propertyName;
 		
 		/**
@@ -420,8 +416,11 @@ public class SqlParameter implements ISqlParameter {
 		private SqlQuery(String propertyName, ISqlQueryStrategy usingQueryStrategy, Object...queryArgs) {
 			this.propertyName = propertyName;
 			this.usingQueryStrategy = usingQueryStrategy;
-			this.queryArgs = queryArgs;
-			this.index = new SqlQueryIndex();
+			if(queryArgs.length > 0) {
+				this.queryArgs = queryArgs;
+			} else {
+				this.queryArgs = null;
+			}
 		}
 		
 		@Override
@@ -467,41 +466,19 @@ public class SqlParameter implements ISqlParameter {
 		private ISqlQuery joinQuery(SqlQuery query, SqlQueryRelation relation) {
 			// 修改关系
 			query.relation = relation;
-			// 本身是组, 直接加入
-			if(this instanceof SqlQueryGroup) {
-				((SqlQueryGroup) this).add(query);
-				return this;
-			}
-			// 如果不是则整理成组
-			if(this.belongGroup == null) {
+			// 如果本身不是查询组则整理成查询组
+			if(this.belongGroup == null && ! (this instanceof SqlQueryGroup)) {
 				this.belongGroup = new SqlQueryGroup(this);
+				this.belongGroup.addQuery(query);
+				return this.belongGroup;
 			}
-			this.belongGroup.add(query);
-			return this.belongGroup;
-		}
-		
-		/**
-		 * 搜索参数索引
-		 * 
-		 * @author linjie
-		 * @since 1.0.1
-		 */
-		private class SqlQueryIndex implements ISqlQueryIndex {
-
-			@Override
-			public boolean isGroup() {
-				return SqlQuery.this instanceof SqlQueryGroup;
+			// 否则找到根查询组来加入此查询
+			SqlQuery query1 = this;
+			while(query1.belongGroup != null) {
+				query1 = query1.belongGroup;
 			}
-
-			@Override
-			public String getQueryName() {
-				return SqlQuery.this.getPropertyName();
-			}
-
-			@Override
-			public ISqlQuery getQuery() {
-				return SqlQuery.this;
-			}
+			((SqlQueryGroup) query1).addQuery(query);
+			return query1;
 		}
 	}
 	
@@ -511,7 +488,7 @@ public class SqlParameter implements ISqlParameter {
 	 * @author linjie
 	 * @since 1.0.1
 	 */
-	static class SqlQueryGroup extends SqlQuery {
+	static class SqlQueryGroup extends SqlQuery implements ISqlQueryGroup {
 		
 		/**
 		 * 包含的子查询条件
@@ -542,7 +519,7 @@ public class SqlParameter implements ISqlParameter {
 			SqlQuery queryReal = (SqlQuery) query;
 			this.head = queryReal;
 			this.head.relation = null; /* 组的头的连接关系被组夺取了 */
-			this.add1(queryReal);
+			this.addQuery1(queryReal);
 		}
 		
 		/**
@@ -553,8 +530,23 @@ public class SqlParameter implements ISqlParameter {
 		 * @author linjie
 		 * @since 1.0.1
 		 */
-		public void add(ISqlQuery query) {
-			this.add1((SqlQuery) query);
+		@Override
+		public boolean addQuery(ISqlQuery query) {
+			return this.addQuery1((SqlQuery) query);
+		}
+		
+		@Override
+		public boolean removeQuery(ISqlQuery query) {
+			if(! this.groupQueries.contains(query)) {
+				return false;
+			}
+			this.groupQueries.remove((SqlQuery) query);
+			return true;
+		}
+
+		@Override
+		public Collection<ISqlQuery> getQueries() {
+			return Collections.unmodifiableCollection(this.groupQueries);
 		}
 		
 		/**
@@ -565,9 +557,13 @@ public class SqlParameter implements ISqlParameter {
 		 * @author linjie
 		 * @since 1.0.1
 		 */
-		private void add1(SqlQuery query) {
+		private boolean addQuery1(SqlQuery query) {
+			if(this.groupQueries.contains(query)) {
+				return false;
+			}
 			this.groupQueries.add(query);
 			query.belongGroup = this;
+			return true;
 		}
 	}
 	

@@ -15,24 +15,24 @@ public interface ISqlParameter {
 	 * 添加查询条件, 如果这不是第一个查询条件则默认使用AND关系连接
 	 * 
 	 * @param query 添加的查询条件, 不能为null
-	 * @return 对应的查询实例, 主要用来
+	 * @return 条件查询实例, <strong>注意是这里返回的是所有查询实例的根, 如果在此返回查询实例上使用连接, 则是WHERE条件下的第一层条件.</strong>
 	 * 
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	ISqlQueryIndex query(ISqlQuery query);
+	ISqlQuery query(ISqlQuery query);
 	
 	/**
 	 * 标记某个属性进行排序
 	 * 
 	 * @param propertyName 属性名称, 不能为null
 	 * @param isAsc 是否是正序排序, 为<tt>false</tt>则为逆序排序
-	 * @return 对应的查询实例
+	 * @return 排序查询实例, 属于当前排序字段
 	 * 
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	ISqlQueryIndex markOrderBy(String propertyName, boolean isAsc);
+	ISqlQuery markOrderBy(String propertyName, boolean isAsc);
 	
 	/**
 	 * 设置查询分页
@@ -40,12 +40,12 @@ public interface ISqlParameter {
 	 * @param page 第几页, 不能小于1, 小于的情况下按1处理
 	 * @param count 一页包含的数量, 不能小于0, 小于的情况下按10处理
 	 * @param offset 起点偏移数, 不能小于0, 小于的情况下按0处理
-	 * @return 对应的查询实例
+	 * @return 分页查询实例
 	 * 
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	ISqlQueryIndex setPagination(int page, int count, int offset);
+	ISqlQuery setPagination(int page, int count, int offset);
 	
 	/**
 	 * 删除查询
@@ -55,7 +55,7 @@ public interface ISqlParameter {
 	 * @author linjie
 	 * @since 1.0.1
 	 */
-	void deleteQuery(ISqlQueryIndex queryIndex);
+	void deleteQuery(ISqlQuery query);
 	
 	/**
 	 * 删除所有条件查询
