@@ -1069,7 +1069,7 @@ public class SqlParameter implements ISqlParameter {
 		}
 		// 处理同组的查询
 		for(ISqlQuery groupQuery : groupQueries) {
-			groupQuery.getUsingStrategy().handle(mapContext, groupQuery, ! isSingleInGroup);
+			SqlParameter.handleQuery(mapContext, groupQuery, ! isSingleInGroup);
 		}
 		// 最后加入 ')'
 		if(isNeedGroupFormat && ! isSingleInGroup) {

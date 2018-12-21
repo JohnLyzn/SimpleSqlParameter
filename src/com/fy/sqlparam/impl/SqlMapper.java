@@ -74,7 +74,7 @@ public class SqlMapper implements ISqlMapper {
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	static final String REGEXP_ALL = "\\{.*?}";
+	static final String REGEXP_ALL = "\\{.*?\\}";
 
 	@Override
 	public void map(ISqlMapContext mapContext, ISqlPart sqlPart) {
