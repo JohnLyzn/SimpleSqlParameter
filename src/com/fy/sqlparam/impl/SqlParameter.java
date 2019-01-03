@@ -416,11 +416,7 @@ public class SqlParameter implements ISqlParameter {
 		private SqlQuery(String propertyName, ISqlQueryStrategy usingQueryStrategy, Object...queryArgs) {
 			this.propertyName = propertyName;
 			this.usingQueryStrategy = usingQueryStrategy;
-			if(queryArgs.length > 0) {
-				this.queryArgs = queryArgs;
-			} else {
-				this.queryArgs = null;
-			}
+			this.queryArgs = queryArgs;
 		}
 		
 		@Override
@@ -587,7 +583,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName()).append("} = ? ");
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+						.append(" = ? ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
 			}
 		}),
@@ -603,7 +600,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName()).append("} <> ? ");
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+						.append(" <> ? ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
 			}
 		}),
@@ -619,8 +617,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName())
-					.append("}  IN (")
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+					.append(" IN (")
 					.append(SqlQueryStrategy.generateReplacementArgsPlaceHolderStr(query.getQueryArgs().length))
 					.append(") ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
@@ -638,8 +636,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName())
-					.append("} NOT IN (")
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+					.append(" NOT IN (")
 					.append(SqlQueryStrategy.generateReplacementArgsPlaceHolderStr(query.getQueryArgs().length))
 					.append(") ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
@@ -657,7 +655,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName()).append("} LIKE ? ");
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+						.append(" LIKE ? ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
 			}
 		}),
@@ -673,7 +672,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName()).append("} BETWEEN ? AND ? ");
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+						.append(" BETWEEN ? AND ? ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
 			}
 		}),
@@ -689,7 +689,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName()).append("} < ? ");
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+						.append(" < ? ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
 			}
 		}),
@@ -705,7 +706,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName()).append("} >= ? ");
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+						.append(" >= ? ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
 			}
 		}),
@@ -721,7 +723,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName()).append("} > ? ");
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+						.append(" > ? ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
 			}
 		}),
@@ -737,7 +740,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName()).append("} <= ? ");
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+						.append(" <= ? ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
 			}
 		}),
@@ -753,7 +757,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName()).append("} IS NULL ");
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+						.append(" IS NULL ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
 			}
 		}),
@@ -768,7 +773,8 @@ public class SqlParameter implements ISqlParameter {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName()).append("} IS NOT NULL ");
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()))
+						.append(" IS NOT NULL ");
 				SqlQueryStrategy.handleConditionsQuery(mapContext, query, sqlPiece, args);
 			}
 		}),
@@ -786,11 +792,11 @@ public class SqlParameter implements ISqlParameter {
 				Boolean isAsc = (Boolean) query.getQueryArgs()[0];
 				
 				StringBuilder sqlPiece = new StringBuilder();
-				sqlPiece.append(" {#").append(query.getPropertyName()).append("} ");
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()));
 				if(isAsc) {
-					sqlPiece.append("ASC ");
+					sqlPiece.append(" ASC ");
 				} else {
-					sqlPiece.append("DESC ");
+					sqlPiece.append(" DESC ");
 				}
 				SqlPart sqlPart = new SqlPart(SqlPartType.ORDER_BY.name(), sqlPiece);
 				sqlPart.setUsingJoinStrategy(SqlJoinStrategy.JOIN_ORDERBYS.instance());
@@ -851,6 +857,19 @@ public class SqlParameter implements ISqlParameter {
 		}
 		
 		/**
+		 * 生成属性映射占位字符串
+		 * 
+		 * @param propertyName 属性名称
+		 * @return 属性映射占位字符串
+		 * 
+		 * @author linjie
+		 * @since 1.0.0
+		 */
+		private static String generatePropertyPlaceholder(String propertyName) {
+			return new StringBuilder("{#").append(propertyName).append("}").toString();
+		}
+		
+		/**
 		 * 处理条件类型的SQL成员
 		 * 
 		 * @param mapContext
@@ -872,10 +891,25 @@ public class SqlParameter implements ISqlParameter {
 				SqlParameter.handleQuery(mapContext, query, isNeedGroupFormat);
 				return;
 			}
+			// 判断是否包含引用占位符, 如果是则进行格式化
+			int scanningAtIndex = -1;
+			for(int i = 0; i < query.getQueryArgs().length; i ++) {
+				final Object queryArg = query.getQueryArgs()[i];
+				if(! (queryArg instanceof String) || ! ((String) queryArg).matches(SqlMapper.REGEXP_ALL)) {
+					continue;
+				}
+				// 参数中的'?'替换为该占位字符串
+				final String propertyPlaceholder = (String) queryArg;
+				scanningAtIndex = sqlPiece.indexOf("?", scanningAtIndex);
+				sqlPiece.replace(scanningAtIndex, scanningAtIndex + 1, propertyPlaceholder);
+				scanningAtIndex += propertyPlaceholder.length();
+				// 把此参数设置为null
+				query.getQueryArgs()[i] = null;
+			}
 			// 否则直接添加查询条件SQL片段到映射上下文
 			SqlPart sqlPart = new SqlPart(SqlPartType.WHERE.name(), sqlPiece);
 			sqlPart.setUsingJoinStrategy(SqlJoinStrategy.JOIN_CONDITIONS.instance());
-			sqlPart.setArgObjs(query.getQueryArgs());
+			sqlPart.setArgObjs(FormatUtils.removeNullInArray(query.getQueryArgs()));
 			if(query.getRelation() != null) {
 				sqlPart.putExtra("relation", query.getRelation());
 			}

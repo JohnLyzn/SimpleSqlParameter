@@ -1,6 +1,5 @@
 package com.fy.sqlparam.param;
 
-
 /**
  * SQL查询
  * 

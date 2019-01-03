@@ -192,7 +192,7 @@ public class SqlMapContext implements ISqlMapContext {
 				this.joinableSqlPartMap.get(SqlPartType.WHERE));
 		this.formatDynamicalChangeSQL(target, SqlPartType.ORDER_BY,
 				this.joinableSqlPartMap.get(SqlPartType.ORDER_BY));
-		// 对生成的映射键值对调用映射处理
+		// 对生成的映射键值对调用映射处理, 一直处理到不再可映射为止
 		boolean lastHandled = true;
 		while(target.indexOf("{") != -1 && lastHandled) {
 			lastHandled = false;
