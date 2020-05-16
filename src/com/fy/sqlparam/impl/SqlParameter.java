@@ -54,6 +54,14 @@ public class SqlParameter implements ISqlParameter {
 	private SqlQuery limit = null;
 	
 	/**
+	 * 空查询条件, 用于需要开始就动态查询的情形
+	 * 
+	 * @author linjie
+	 * @since 1.0.2
+	 */
+	private SqlQuery empty = null;
+	
+	/**
 	 * 查询构建器
 	 * 
 	 * @author linjie
@@ -105,6 +113,15 @@ public class SqlParameter implements ISqlParameter {
 		// 不是第一个就直接加入即可
 		this.conditions.and(query); /* 默认使用AND连接 */
 		return this.conditions;
+	}
+	
+	@Override
+	public ISqlQuery query() {
+		if(this.empty == null) {
+			this.empty = (SqlQuery) Query.to("1").eq("1");
+			this.query(this.empty);
+		}
+		return this.empty;
 	}
 	
 	@Override
@@ -169,6 +186,9 @@ public class SqlParameter implements ISqlParameter {
 	
 	@Override
 	public ISqlMapContext generateMapContext(ISqlParameterContext paramContext, ISqlMapper sqlMapper) {
+		if(this.empty != null) {
+			this.deleteQuery(this.empty);
+		}
 		SqlMapContext mapContext = new SqlMapContext(paramContext, sqlMapper);
 		SqlParameter.handleQuery(mapContext, this.conditions, false);
 		SqlParameter.handleQuery(mapContext, this.sorts, false);

@@ -23,6 +23,16 @@ public interface ISqlParameter {
 	ISqlQuery query(ISqlQuery query);
 	
 	/**
+	 * 获取一个空的查询条件, 用与后续条件判断拼接查询条件
+	 * 
+	 * @return 条件查询实例,  此查询没有意义
+	 * 
+	 * @author linjie
+	 * @since 1.0.2
+	 */
+	ISqlQuery query();
+	
+	/**
 	 * 标记某个属性进行排序
 	 * 
 	 * @param propertyName 属性名称, 不能为null
