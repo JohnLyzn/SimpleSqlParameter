@@ -21,6 +21,17 @@ public interface ISqlMapMeta {
 	String getName();
 	
 	/**
+	 * 此SQL映射元信息能否处理指定类型的SQL成员
+	 * 
+	 * @param type 指定的SQL成员类型名称
+	 * @return 是否能够处理
+	 * 
+	 * @author linjie
+	 * @since 1.0.3
+	 */
+	boolean accept(String type);
+	
+	/**
 	 * 添加包含的SQL成员
 	 * 
 	 * @param sqlPart SQL成员, 不能为null

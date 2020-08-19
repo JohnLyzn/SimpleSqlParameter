@@ -21,12 +21,28 @@ import com.fy.sqlparam.map.ISqlPart;
 public class SqlMapper implements ISqlMapper {
 
 	/**
+	 * SQL中匹配插入查询的映射位置的正则表达式
+	 * 
+	 * @author linjie
+	 * @since 1.0.0
+	 */
+	static final String REGEXP_SELECT = "\\f(?<=SELECT.{0,100})(?= +FROM)";
+	
+	/**
+	 * SQL中匹配基础关联表的映射位置的正则表达式
+	 * 
+	 * @author linjie
+	 * @since 1.0.0
+	 */
+	public static final String REGEXP_BASE_TABLES = "\\{BASE_TABLES\\}";
+	
+	/**
 	 * SQL中匹配额外关联表的映射位置的正则表达式
 	 * 
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	static final String REGEXP_EXTRA_TABLES = "\\{EXTRA_TABLES\\}";
+	public static final String REGEXP_EXTRA_TABLES = "\\{EXTRA_TABLES\\}";
 	
 	/**
 	 * SQL中匹配条件的映射位置的正则表达式
@@ -34,7 +50,7 @@ public class SqlMapper implements ISqlMapper {
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	static final String REGEXP_CONDITIONS = "\\{CONDITIONS\\}";
+	public static final String REGEXP_CONDITIONS = "\\{CONDITIONS\\}";
 	
 	/**
 	 * SQL中匹配排序的映射位置的正则表达式
@@ -42,7 +58,7 @@ public class SqlMapper implements ISqlMapper {
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	static final String REGEXP_ORDER_BY = "\\{ORDER_BY\\}";
+	public static final String REGEXP_ORDER_BY = "\\{ORDER_BY\\}";
 	
 	/**
 	 * SQL中匹配分页的映射位置的正则表达式
@@ -50,7 +66,7 @@ public class SqlMapper implements ISqlMapper {
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	static final String REGEXP_LIMIT = "\\{LIMIT\\}";
+	public static final String REGEXP_LIMIT = "\\{LIMIT\\}";
 	
 	/**
 	 * SQL中匹配引用的映射位置的正则表达式
@@ -78,10 +94,10 @@ public class SqlMapper implements ISqlMapper {
 
 	@Override
 	public void map(ISqlMapContext mapContext, ISqlPart sqlPart) {
-		// 把待处理的SQL作无类型的SQL成员, 以处理其中的引用
-		SqlMapStrategy.MAP_STATIC.instance().handle(mapContext, sqlPart);
-		SqlMapStrategy.MAP_IFDEPENDENT.instance().handle(mapContext, sqlPart);
-		SqlMapStrategy.MAP_REFRERENCE.instance().handle(mapContext, sqlPart);
+		// 尝试 把待处理的SQL当做无类型的SQL成员, 全部类型尝试处理一次, 顺序为声明顺序
+		for(SqlMapStrategy strategy : SqlMapStrategy.values()) {
+			strategy.instance().handle(mapContext, sqlPart);
+		}
 	}
 	
 	/**
@@ -107,6 +123,14 @@ public class SqlMapper implements ISqlMapper {
 		 * @since 1.0.0
 		 */
 		private final ISqlPart sqlPart;
+		
+		/**
+		 * 此映射是否可以重复, 有些映射做一次后失效
+		 * 
+		 * @author linjie
+		 * @since 1.0.3
+		 */
+		private boolean canRepeat = true;
 		
 		/**
 		 * 构造SQL映射关系实例
@@ -140,9 +164,19 @@ public class SqlMapper implements ISqlMapper {
 
 		@Override
 		public boolean actMapping(StringBuilder rawSql) {
-			return SqlMapper.findAndReplaceContentByRegExpStr(rawSql, 
+			if(! this.canRepeat) {
+				return false;
+			}
+			boolean result = SqlMapper.findAndReplaceContentByRegExpStr(rawSql, 
 					this.mapStr, this.sqlPart.getContent().toString());
+			if(this.mapStr.startsWith("\\f") && result) {
+				this.canRepeat = false;
+				return result;
+			}
+			return result;
 		}
+		
+		
 	}
 	
 	/**
@@ -165,9 +199,10 @@ public class SqlMapper implements ISqlMapper {
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlPart sqlPart, Object...args) {
 				String mapStr = sqlPart.getAssignedMapStr();
-				if(mapStr != null) {
-					mapContext.addMapEntry(new SqlMapEntry(mapStr, sqlPart));
+				if(mapStr == null) {
+					return;
 				}
+				mapContext.addMapEntry(new SqlMapEntry(mapStr, sqlPart));
 			}
 		}),
 		
@@ -181,26 +216,32 @@ public class SqlMapper implements ISqlMapper {
 
 			@Override
 			public void handle(ISqlMapContext mapContext, ISqlPart sqlPart, Object...args) {
-				StringBuilder sql = sqlPart.getContent();
+				StringBuilder sql = new StringBuilder(sqlPart.getContent());
 				Pattern pattern = Pattern.compile(SqlMapper.REGEXP_REFERENCE);
 				Matcher matcher = pattern.matcher(sql);
 				while(matcher.find()) {
 					String refrenceStr = sql.substring(matcher.start(), matcher.end());
 					String refrenceName = refrenceStr.replaceAll("[\\{\\#\\}]", "");
-					if(refrenceName.startsWith(":")) { /* 加上:仅用来提醒需要加入依赖, 本身这个位置不需要被替换 */
+					if(refrenceName.startsWith(":")) { /* 加上:仅用来提醒需要加入依赖, 本身这个位置不需要被映射 */
 						refrenceName = refrenceName.replaceAll(":", "");
 					}
-					ISqlMapMeta mapMeta = mapContext.notifyHandleDependentMapMeta(refrenceName);
-					if(mapMeta != null) {
-						for(ISqlPart includeSqlPart : mapMeta.getSqlParts()) {
-							String mapStr = includeSqlPart.getAssignedMapStr();
-							if(mapStr == null) {
-								mapContext.addMapEntry(new SqlMapEntry(
-										this.formatRefrenceNameAsMapStr(refrenceName),
-										includeSqlPart));
-								break;
-							}
+					// 先处理依赖
+					ISqlMapMeta mapMeta = mapContext.notifyHandleDependentMapMeta(sqlPart, refrenceName);
+					if(mapMeta == null) {
+						continue;
+					}
+					// 对包含的所有SQL内容生成映射键值对
+					for(ISqlPart includeSqlPart : mapMeta.getSqlParts()) {
+						// 如果是静态映射, 上下文已经加过, 要跳过处理
+						String mapStr = includeSqlPart.getAssignedMapStr();
+						if(mapStr != null) {
+							continue;
 						}
+						// 只会有一个
+						mapContext.addMapEntry(new SqlMapEntry(
+								this.formatRefrenceNameAsMapStr(refrenceName),
+								includeSqlPart));
+						break;
 					}
 				}
 			}
@@ -323,9 +364,22 @@ public class SqlMapper implements ISqlMapper {
 	 */
 	public static boolean findAndReplaceContentByRegExpStr(StringBuilder sql,
 			String regExpStr, String replaceBy) {
+		boolean isFirst = false;
+		if(regExpStr.startsWith("\\f")) {
+			regExpStr = regExpStr.replace("\\f", "");
+			isFirst = true;
+			if(sql.indexOf(replaceBy) != -1) {
+				return true;
+			}
+		}
 		Pattern pattern = Pattern.compile(regExpStr);
 		Matcher matcher = pattern.matcher(sql);
-		String result = matcher.replaceAll(replaceBy);
+		String result = null;
+		if(isFirst) {
+			result = matcher.replaceFirst(replaceBy);
+		} else {
+			result = matcher.replaceAll(replaceBy);
+		}
 		boolean hasReplaced = ! result.equals(sql.toString());
 		if(hasReplaced) {
 			sql.delete(0, sql.length());

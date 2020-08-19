@@ -7,6 +7,7 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import java.lang.reflect.Constructor;
 
+import com.fy.sqlparam.impl.SqlMapper;
 import com.fy.sqlparam.impl.SqlMapContext.SqlJoinStrategy;
 import com.fy.sqlparam.impl.SqlMapContext.SqlMapMeta;
 import com.fy.sqlparam.impl.SqlMapContext.SqlPartType;
@@ -39,7 +40,15 @@ public @interface MapMetaConfig {
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	FieldMapMeta[] fields();
+	FieldMapMeta[] queryFields();
+	
+	/**
+	 * 包含的可输出字段
+	 * 
+	 * @author linjie
+	 * @since 1.0.0
+	 */
+	FieldMapMeta[] selectFields() default {};
 	
 	/**
 	 * 包含的关联表, 可以没有
@@ -79,22 +88,48 @@ public @interface MapMetaConfig {
 				if(configAnno != null) {
 					// 基本表信息的映射内容
 					String baseTablesSql = configAnno.baseTables();
-					SqlMapEntry mapEntry = MapMetaAnnoInitializor.generateMapEntry("\\{BASE_TABLES\\}", baseTablesSql);
+					SqlMapEntry mapEntry = MapMetaAnnoInitializor.generateMapEntry(SqlMapper.REGEXP_BASE_TABLES, baseTablesSql);
 					paramContext.addDefaultMapEntry(mapEntry);
 					
-					FieldMapMeta[] fieldAnnoes = configAnno.fields();
+					FieldMapMeta[] selectFieldAnnoes = configAnno.selectFields();
+					FieldMapMeta[] queryFieldAnnoes = configAnno.queryFields();
 					TableMapMeta[] joinTableAnnoes = configAnno.joinTables();
 					Query[] defaultQueryAnnoes = configAnno.defaultQueries();
-					// 字段的映射内容
-					for(FieldMapMeta fieldAnno : fieldAnnoes) {
-						String fieldName = fieldAnno.name();
-						String dbFieldName = fieldAnno.value();
-						String[] dependentMapMetaNames = fieldAnno.dependencyNames();
-						Query[] triggleQueryAnnoes = fieldAnno.triggleQueries();
+					// 可输出字段的映射内容
+					for(FieldMapMeta selectFieldAnno : selectFieldAnnoes) {
+						String fieldName = selectFieldAnno.name();
+						String dbFieldName = selectFieldAnno.value();
+						String[] dependentMapMetaNames = selectFieldAnno.dependencyNames();
+						Query[] triggleQueryAnnoes = selectFieldAnno.triggleQueries();
 						
-						SqlMapMeta mapMeta = MapMetaAnnoInitializor.generateMapMeta(fieldName);
-						SqlPart dbFieldSqlPart = MapMetaAnnoInitializor.generateSqlPart4DbField(fieldName,
-								dbFieldName, dependentMapMetaNames);
+						SqlMapMeta mapMeta = MapMetaAnnoInitializor.generateMapMeta(
+								fieldName, SqlPartType.SELECT.name());
+						SqlPart dbFieldSqlPart = MapMetaAnnoInitializor.generateSqlPart4DbField(
+								fieldName, dbFieldName, dependentMapMetaNames);
+						mapMeta.addSqlPart(dbFieldSqlPart);
+						paramContext.addDefaultMapMeta(mapMeta);
+						
+						for(Query triggleQueryAnno : triggleQueryAnnoes) {
+							String conditionSql = triggleQueryAnno.value();
+							boolean isAnd = triggleQueryAnno.isAnd();
+							String[] triggleDependentMapMetaNames = triggleQueryAnno.denpendencyNames();
+							
+							SqlPart sqlPart = MapMetaAnnoInitializor.generateSqlPart4QueryContent(
+									conditionSql, isAnd, triggleDependentMapMetaNames);
+							mapMeta.addSqlPart(sqlPart);
+						}
+					}
+					// 可查询字段的映射内容
+					for(FieldMapMeta queryFieldAnno : queryFieldAnnoes) {
+						String fieldName = queryFieldAnno.name();
+						String dbFieldName = queryFieldAnno.value();
+						String[] dependentMapMetaNames = queryFieldAnno.dependencyNames();
+						Query[] triggleQueryAnnoes = queryFieldAnno.triggleQueries();
+						
+						SqlMapMeta mapMeta = MapMetaAnnoInitializor.generateMapMeta(
+								fieldName, null);
+						SqlPart dbFieldSqlPart = MapMetaAnnoInitializor.generateSqlPart4DbField(
+								fieldName, dbFieldName, dependentMapMetaNames);
 						mapMeta.addSqlPart(dbFieldSqlPart);
 						paramContext.addDefaultMapMeta(mapMeta);
 						
@@ -114,7 +149,8 @@ public @interface MapMetaConfig {
 						String joinTableSql = joinTableAnno.value();
 						String[] dependentMapMetaNames = joinTableAnno.dependencyNames();
 						
-						SqlMapMeta mapMeta = MapMetaAnnoInitializor.generateMapMeta(tableMetaName);
+						SqlMapMeta mapMeta = MapMetaAnnoInitializor.generateMapMeta(
+								tableMetaName, SqlPartType.FROM_TABLES.name());
 						mapMeta.addSqlPart(MapMetaAnnoInitializor.generateSqlPart4JoinTables(joinTableSql,
 								dependentMapMetaNames));
 						paramContext.addDefaultMapMeta(mapMeta);
@@ -143,8 +179,8 @@ public @interface MapMetaConfig {
 		 * @author linjie
 		 * @since 1.0.0
 		 */
-		private static SqlMapMeta generateMapMeta(String name) {
-			return new SqlMapMeta(name);
+		private static SqlMapMeta generateMapMeta(String name, String acceptTypes) {
+			return new SqlMapMeta(name, acceptTypes);
 		}
 		
 		/**
@@ -172,9 +208,9 @@ public @interface MapMetaConfig {
 		 * @author linjie
 		 * @since 1.0.0
 		 */
-		private static SqlPart generateSqlPart4DbField(String fieldName, String dbFieldName,
-				String[] dependentMapMetaNames) {
-			SqlPart result = new SqlPart(null, new StringBuilder(dbFieldName));
+		private static SqlPart generateSqlPart4DbField(String fieldName, 
+				String dbFieldName, String[] dependentMapMetaNames) {
+			SqlPart result = new SqlPart(null /* 作无类型静态映射 */, new StringBuilder(dbFieldName));
 			if(dependentMapMetaNames != null && dependentMapMetaNames.length > 0) {
 				for(String dependentMapMetaName : dependentMapMetaNames) {
 					result.addDependentMapMetaName(dependentMapMetaName);

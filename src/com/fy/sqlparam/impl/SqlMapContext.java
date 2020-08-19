@@ -17,6 +17,7 @@ import com.fy.sqlparam.map.ISqlMapMeta;
 import com.fy.sqlparam.map.ISqlMapResult;
 import com.fy.sqlparam.map.ISqlMapper;
 import com.fy.sqlparam.map.ISqlPart;
+import com.fy.sqlparam.map.ISqlPartType;
 import com.fy.sqlparam.param.ISqlParameterContext;
 import com.fy.sqlparam.param.ISqlQuery.SqlQueryRelation;
 import com.fy.sqlparam.util.FormatUtils;
@@ -67,7 +68,7 @@ public class SqlMapContext implements ISqlMapContext {
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	private final Map<SqlPartType, ISqlPart> joinableSqlPartMap = new HashMap<SqlPartType, ISqlPart>();
+	private final Map<String, ISqlPart> joinableSqlPartMap = new HashMap<String, ISqlPart>();
 	
 	/**
 	 * 当前映射上下文中包含的映射键值对
@@ -140,8 +141,11 @@ public class SqlMapContext implements ISqlMapContext {
 	}
 	
 	@Override
-	public List<ISqlPart> getSqlParts() {
-		return Collections.unmodifiableList(this.allSqlParts);
+	public void removeMapMeta(ISqlMapMeta mapMeta) {
+		if(mapMeta == null || ! this.tempMapMetaMap.containsValue(mapMeta)) {
+			return;
+		}
+		this.tempMapMetaMap.remove(mapMeta.getName(), mapMeta);
 	}
 
 	@Override
@@ -153,6 +157,47 @@ public class SqlMapContext implements ISqlMapContext {
 	}
 	
 	@Override
+	public void removeSqlPart(ISqlPart sqlPart) {
+		if(sqlPart == null) {
+			return;
+		}
+		// 如果就在列表里, 直接删除
+		if(this.allSqlParts.indexOf(sqlPart) != -1) {
+			this.allSqlParts.remove(sqlPart);
+		}
+		// 如果存在由此SQL成员生成的映射键值对, 要把它删掉
+		List<ISqlMapEntry> needRemoveEntries = new LinkedList<ISqlMapEntry>();
+		for(ISqlMapEntry mapEntry : this.mapEntries) {
+			if(mapEntry.getSqlPart().equals(sqlPart)) {
+				needRemoveEntries.add(mapEntry);
+			}
+		}
+		this.mapEntries.removeAll(needRemoveEntries);
+		// 如果是可拼接SQL成员的一部分, 要把这部分也删除掉
+		ISqlPart existSqlPart = this.joinableSqlPartMap.get(sqlPart.getType());
+		if(existSqlPart == null) {
+			return;
+		}
+		// 如果就是用于拼接的容器SQL成员, 直接清除掉该引用
+		if(existSqlPart.equals(sqlPart)) {
+			this.joinableSqlPartMap.remove(sqlPart.getType());
+			return;
+		}
+		// 找到相应位置的内容删除掉
+		String content = sqlPart.getContent().toString();
+		int start = existSqlPart.getContent().indexOf(content);
+		if(start == -1) {
+			return;
+		}
+		existSqlPart.getContent().delete(start, start + content.length());
+	}
+	
+	@Override
+	public List<ISqlPart> getSqlParts() {
+		return Collections.unmodifiableList(this.allSqlParts);
+	}
+	
+	@Override
 	public void addMapEntry(ISqlMapEntry mapEntry) {
 		if(mapEntry == null) {
 			throw new IllegalArgumentException("添加的SQL映射信息对不能为null");
@@ -161,17 +206,29 @@ public class SqlMapContext implements ISqlMapContext {
 	}
 	
 	@Override
+	public void removeMapEntry(ISqlMapEntry mapEntry) {
+		if(mapEntry == null || mapEntries.indexOf(mapEntry) == -1) {
+			return;
+		}
+		mapEntries.remove(mapEntry);
+	}
+	
+	@Override
 	public boolean hasHandleDependentMapMeta(String name) {
 		return this.handledMapMetaNames.contains(name);
 	}
 	
 	@Override
-	public ISqlMapMeta notifyHandleDependentMapMeta(String name) {
-		if(this.handledMapMetaNames.contains(name)) {
-			return null;
-		}
+	public ISqlMapMeta notifyHandleDependentMapMeta(ISqlPart srcSqlPart, String name) {
 		ISqlMapMeta mapMeta = this.getMapMetaByName(name);
 		if(mapMeta == null) {
+			return null;
+		}
+		if(! mapMeta.accept(srcSqlPart.getType())) {
+			throw new IllegalArgumentException(String.format(
+					"映射元[%s]不支持在%s中使用", name, srcSqlPart.getType()));
+		}
+		if(this.handledMapMetaNames.contains(name)) {
 			return null;
 		}
 		this.handledMapMetaNames.add(name);
@@ -184,14 +241,14 @@ public class SqlMapContext implements ISqlMapContext {
 	
 	@Override
 	public ISqlMapResult generateMapResult(String rawSql) {
-		// 把源SQL作为SQL成员加入, 处理其中的映射字符串
+		// 把源SQL处理为SQL成员, 处理其中的映射字符串
 		StringBuilder target = new StringBuilder(rawSql);
 		this.addSqlPart(new SqlPart(null, target));
-		// 格式化某些可能动态变化的容器SQL成员
-		this.formatDynamicalChangeSQL(target, SqlPartType.WHERE,
-				this.joinableSqlPartMap.get(SqlPartType.WHERE));
-		this.formatDynamicalChangeSQL(target, SqlPartType.ORDER_BY,
-				this.joinableSqlPartMap.get(SqlPartType.ORDER_BY));
+		// 按SQL成员类型进行一些格式化处理
+		for(SqlPartType type : SqlPartType.values()) {
+			this.formatDynamicalChangeSQL(target, type,
+					this.joinableSqlPartMap.get(type.name()));
+		}
 		// 对生成的映射键值对调用映射处理, 一直处理到不再可映射为止
 		boolean lastHandled = true;
 		while(target.indexOf("{") != -1 && lastHandled) {
@@ -206,14 +263,13 @@ public class SqlMapContext implements ISqlMapContext {
 		SqlMapper.wipeRegExpStrWhenNoMapEntries(target, SqlMapper.REGEXP_ALL, null);
 		// 拼接所有参数数组
 		Object[] argObjs = null;
-		argObjs = SqlJoinStrategy.joinSqlPartArgObjs(argObjs,
-				this.joinableSqlPartMap.get(SqlPartType.FROM_TABLES));
-		argObjs = SqlJoinStrategy.joinSqlPartArgObjs(argObjs,
-				this.joinableSqlPartMap.get(SqlPartType.WHERE));
+		for(ISqlPart sqlPart : this.allSqlParts) {
+			argObjs = this.joinAllSqlPartArgObjs(argObjs, sqlPart);
+		}
 		// 返回结果
 		return new SqlMapResult(target.toString(), argObjs);
 	}
-	
+
 	/**
 	 * SQL映射元信息的实现
 	 * <br/>利用enum来单例, 同时减少类文件
@@ -232,6 +288,14 @@ public class SqlMapContext implements ISqlMapContext {
 		private final String name;
 		
 		/**
+		 * 严格接收作为指定类型的SQL成员
+		 * 
+		 * @author linjie
+		 * @since 1.0.3
+		 */
+		private final String acceptTypes;
+		
+		/**
 		 * 包含的SQL成员
 		 * 
 		 * @author linjie
@@ -239,8 +303,9 @@ public class SqlMapContext implements ISqlMapContext {
 		 */
 		private final List<ISqlPart> includeSqlParts = new LinkedList<ISqlPart>();
 
-		public SqlMapMeta(String name) {
+		public SqlMapMeta(String name, String acceptTypes) {
 			this.name = name;
+			this.acceptTypes = acceptTypes;
 		}
 		
 		@Override
@@ -256,6 +321,14 @@ public class SqlMapContext implements ISqlMapContext {
 		@Override
 		public List<ISqlPart> getSqlParts() {
 			return this.includeSqlParts;
+		}
+
+		@Override
+		public boolean accept(String type) {
+			if(this.acceptTypes == null) {
+				return true;
+			}
+			return acceptTypes.indexOf(type) != -1;
 		}
 	}
 	
@@ -323,7 +396,20 @@ public class SqlMapContext implements ISqlMapContext {
 		 * @author linjie
 		 * @since 1.0.0
 		 */
-		SELECT,
+		SELECT(new ISqlPartType() {
+			@Override
+			public String getBasicAssignedMapStr() {
+				return SqlMapper.REGEXP_SELECT;
+			}
+
+			@Override
+			public void formatBeforeMapping(StringBuilder rawSql, ISqlPart sqlPart) {
+				if(sqlPart == null) {
+					return;
+				}
+				sqlPart.getContent().insert(0, ",");
+			}
+		}),
 		
 		/**
 		 * SQL语句中的FROM_TABLES部分
@@ -331,7 +417,21 @@ public class SqlMapContext implements ISqlMapContext {
 		 * @author linjie
 		 * @since 1.0.0
 		 */
-		FROM_TABLES,
+		FROM_TABLES(new ISqlPartType() {
+			@Override
+			public String getBasicAssignedMapStr() {
+				return SqlMapper.REGEXP_EXTRA_TABLES;
+			}
+
+			@Override
+			public void formatBeforeMapping(StringBuilder rawSql, ISqlPart sqlPart) {
+				if(sqlPart == null) {
+					return;
+				}
+				SqlMapper.findAndReplaceContentByRegExpStr(rawSql,
+						SqlMapper.REGEXP_EXTRA_TABLES, ",");
+			}
+		}),
 		
 		/**
 		 * SQL语句中的CONDITIONS部分
@@ -339,14 +439,42 @@ public class SqlMapContext implements ISqlMapContext {
 		 * @author linjie
 		 * @since 1.0.0
 		 */
-		WHERE,
+		WHERE(new ISqlPartType() {
+			@Override
+			public String getBasicAssignedMapStr() {
+				return SqlMapper.REGEXP_CONDITIONS;
+			}
+
+			@Override
+			public void formatBeforeMapping(StringBuilder rawSql, ISqlPart sqlPart) {
+				if(sqlPart != null && sqlPart.getContent().length() > 0) {
+					return;
+				}
+				/* 如果没有查询条件, 则默认加上一个没意义的条件1=1使得后面拼接的SQL内容不会出错 */
+				SqlMapper.findAndReplaceContentByRegExpStr(rawSql,
+						"WHERE(?=([ ]+\\{))", "WHERE 1=1 ");
+			}
+		}),
 		
 		/**
 		 * SQL语句中的GROUP_BY部分
 		 * @author linjie
 		 * @since 1.0.0
 		 */
-		GROUP_BY,
+		GROUP_BY(new ISqlPartType() {
+			@Override
+			public String getBasicAssignedMapStr() {
+				return null;
+			}
+
+			@Override
+			public void formatBeforeMapping(StringBuilder rawSql, ISqlPart sqlPart) {
+				if(sqlPart == null) {
+					return;
+				}
+				sqlPart.getContent().insert(0, "ORDER BY ");
+			}
+		}),
 		
 		/**
 		 * SQL语句中的ORDER_BY部分
@@ -354,7 +482,17 @@ public class SqlMapContext implements ISqlMapContext {
 		 * @author linjie
 		 * @since 1.0.0
 		 */
-		ORDER_BY,
+		ORDER_BY(new ISqlPartType() {
+			@Override
+			public String getBasicAssignedMapStr() {
+				return SqlMapper.REGEXP_ORDER_BY;
+			}
+
+			@Override
+			public void formatBeforeMapping(StringBuilder rawSql, ISqlPart sqlPart) {
+				
+			}
+		}),
 		
 		/**
 		 * SQL语句中的LIMIT部分
@@ -362,7 +500,51 @@ public class SqlMapContext implements ISqlMapContext {
 		 * @author linjie
 		 * @since 1.0.0
 		 */
-		LIMIT;
+		LIMIT(new ISqlPartType() {
+			@Override
+			public String getBasicAssignedMapStr() {
+				return SqlMapper.REGEXP_LIMIT;
+			}
+
+			@Override
+			public void formatBeforeMapping(StringBuilder rawSql, ISqlPart sqlPart) {
+				
+			}
+		});
+		
+		
+		/**
+		 * SQL成员处理器的实例
+		 * 
+		 * @author linjie
+		 * @since 1.0.0
+		 */
+		private final ISqlPartType handler;
+		
+		/**
+		 * 内部构造器: 提供SQL成员处理器的实例
+		 * 
+		 * @param strategy SQL成员处理器的实例
+		 * 
+		 * @author linjie
+		 * @since 1.0.0
+		 */
+		private SqlPartType(ISqlPartType handler) {
+			this.handler = handler;
+		}
+		
+		/**
+		 * 获取SQL成员处理器的实例
+		 * 
+		 * @return SQL成员处理器的实例
+		 * 
+		 * @author linjie
+		 * @since 1.0.0
+		 */
+		public ISqlPartType instance() {
+			return this.handler;
+		}
+		
 		
 		/**
 		 * 根据名字获取枚举量, 如果找不到不会抛出异常
@@ -395,6 +577,25 @@ public class SqlMapContext implements ISqlMapContext {
 	public enum SqlJoinStrategy {
 		
 		/**
+		 * 拼接字段返回SQL的处理方案
+		 * 
+		 * @author linjie
+		 * @since 1.0.0
+		 */
+		JOIN_SELECT(new ISqlJoinStrategy() {
+
+			@Override
+			public void joinSqlPart(ISqlPart source, ISqlPart other, Object...args) {
+				SqlJoinStrategy.joinSqlParts(source, ",", other);
+			}
+
+			@Override
+			public Object[] joinArgObjs(Object[] otherArgObjs, ISqlPart sqlPart) {
+				return otherArgObjs;
+			}
+		}),
+		
+		/**
 		 * 拼接关联表SQL的处理方案
 		 * 
 		 * @author linjie
@@ -403,8 +604,13 @@ public class SqlMapContext implements ISqlMapContext {
 		JOIN_JOINTABLES(new ISqlJoinStrategy() {
 
 			@Override
-			public void handle(ISqlPart source, ISqlPart other, Object...args) {
+			public void joinSqlPart(ISqlPart source, ISqlPart other, Object...args) {
 				SqlJoinStrategy.joinSqlParts(source, " ", other);
+			}
+
+			@Override
+			public Object[] joinArgObjs(Object[] otherArgObjs, ISqlPart sqlPart) {
+				return SqlJoinStrategy.joinSqlPartArgObjs(otherArgObjs, sqlPart);
 			}
 		}),
 		
@@ -417,11 +623,16 @@ public class SqlMapContext implements ISqlMapContext {
 		JOIN_CONDITIONS(new ISqlJoinStrategy() {
 
 			@Override
-			public void handle(ISqlPart source, ISqlPart other, Object...args) {
+			public void joinSqlPart(ISqlPart source, ISqlPart other, Object...args) {
 				SqlQueryRelation relation = (SqlQueryRelation) other.getExtra("relation");
 				String middleStr = relation == null ? "" 
 						: SqlQueryRelation.AND.equals(relation) ? " AND " : " OR ";
 				SqlJoinStrategy.joinSqlParts(source, middleStr, other);
+			}
+
+			@Override
+			public Object[] joinArgObjs(Object[] otherArgObjs, ISqlPart sqlPart) {
+				return SqlJoinStrategy.joinSqlPartArgObjs(otherArgObjs, sqlPart);
 			}
 		}),
 		
@@ -434,8 +645,13 @@ public class SqlMapContext implements ISqlMapContext {
 		JOIN_ORDERBYS(new ISqlJoinStrategy() {
 			
 			@Override
-			public void handle(ISqlPart source, ISqlPart other, Object...args) {
+			public void joinSqlPart(ISqlPart source, ISqlPart other, Object...args) {
 				SqlJoinStrategy.joinSqlParts(source, ", ", other);
+			}
+
+			@Override
+			public Object[] joinArgObjs(Object[] otherArgObjs, ISqlPart sqlPart) {
+				return otherArgObjs;
 			}
 		});
 		
@@ -473,6 +689,7 @@ public class SqlMapContext implements ISqlMapContext {
 		
 		/**
 		 * 辅助函数: 拼接SQL成员的实现
+		 * <br/> 注意: 拼接SQL就行, 不要拼接参数数组, 防止删除SQL成员时困难
 		 * 
 		 * @param source 源SQL成员
 		 * @param middleStr 中间拼接字符串
@@ -483,19 +700,14 @@ public class SqlMapContext implements ISqlMapContext {
 		 */
 		private static void joinSqlParts(ISqlPart source, String middleStr, ISqlPart...others) {
 			if(source != null && others.length > 0) {
-				SqlPart sourceReal = (SqlPart) source;
 				StringBuilder sourceSql = source.getContent();
-				Object[] sourceArgObjs = source.getArgObjs();
 				for(ISqlPart other : others) {
 					// 拼接sql
 					if(sourceSql.length() != 0 && middleStr != null && ! middleStr.isEmpty()) {
 						sourceSql.append(middleStr);
 					}
 					sourceSql.append(other.getContent());
-					// 拼接参数对象数组
-					sourceArgObjs = SqlJoinStrategy.joinSqlPartArgObjs(sourceArgObjs, other);
 				}
-				sourceReal.setArgObjs(sourceArgObjs);
 			}
 		}
 		
@@ -541,6 +753,22 @@ public class SqlMapContext implements ISqlMapContext {
 	}
 	
 	/**
+	 * 按类型设置SQL成员的映射字符串
+	 * 
+	 * @param sqlPart SQL成员
+	 * 
+	 * @author linjie
+	 * @since 1.0.0
+	 */
+	private void setMapStr4BasicSqlPart(SqlPartType type, ISqlPart sqlPart) {
+		final String assignedMapStr = type.instance().getBasicAssignedMapStr();
+		if(assignedMapStr == null) {
+			return;
+		}
+		sqlPart.setAssignedMapStr(assignedMapStr);
+	}
+	
+	/**
 	 * 格式化某些会动态变化的SQL内容
 	 * 
 	 * @param rawSql 需要处理的源SQL
@@ -552,49 +780,24 @@ public class SqlMapContext implements ISqlMapContext {
 	 */
 	private void formatDynamicalChangeSQL(StringBuilder rawSql,
 			SqlPartType type, ISqlPart containerSqlPart) {
-		switch(type) {
-		case WHERE:
-			if(containerSqlPart == null) {
-				/* 如果没有查询条件, 则默认加上一个没意义的条件1=1使得后面拼接的SQL内容不会出错 */
-				SqlMapper.findAndReplaceContentByRegExpStr(rawSql,
-						"WHERE(?=([ ]+\\{))", "WHERE 1=1 ");
-			}
-			break;
-		case ORDER_BY:
-			if(containerSqlPart != null) {
-				containerSqlPart.getContent().insert(0, "ORDER BY ");
-			}
-			break;
-		default:
-			break;
-		}
+		type.instance().formatBeforeMapping(rawSql, containerSqlPart);
 	}
 	
 	/**
-	 * 按类型设置SQL成员的映射字符串
 	 * 
-	 * @param sqlPart SQL成员
-	 * 
-	 * @author linjie
-	 * @since 1.0.0
+	 * @param otherArgObjs
+	 * @param sqlPart
+	 * @return
 	 */
-	private void setMapStr4BasicSqlPart(SqlPartType type, ISqlPart sqlPart) {
-		switch(type) {
-		case FROM_TABLES:
-			sqlPart.setAssignedMapStr(SqlMapper.REGEXP_EXTRA_TABLES);
-			break;
-		case WHERE:
-			sqlPart.setAssignedMapStr(SqlMapper.REGEXP_CONDITIONS);
-			break;
-		case ORDER_BY:
-			sqlPart.setAssignedMapStr(SqlMapper.REGEXP_ORDER_BY);
-			break;
-		case LIMIT:
-			sqlPart.setAssignedMapStr(SqlMapper.REGEXP_LIMIT);
-			break;
-		default:
-			break;
+	private Object[] joinAllSqlPartArgObjs(Object[] otherArgObjs, ISqlPart sqlPart) {
+		if(sqlPart == null) {
+			return otherArgObjs;
 		}
+		final ISqlJoinStrategy joinStragy = sqlPart.getUsingJoinStrategy();
+		if(joinStragy == null) {
+			return otherArgObjs;
+		}
+		return joinStragy.joinArgObjs(otherArgObjs, sqlPart);
 	}
 	
 	/**
@@ -611,37 +814,44 @@ public class SqlMapContext implements ISqlMapContext {
 		Set<String> dependentMapMetaNames = sqlPart.getDependentMapMetaNames();
 		if(dependentMapMetaNames != null && ! dependentMapMetaNames.isEmpty()) {
 			for(String dependentMapMetaName : dependentMapMetaNames) {
-				this.notifyHandleDependentMapMeta(dependentMapMetaName);
+				this.notifyHandleDependentMapMeta(sqlPart, dependentMapMetaName);
 			}
 		}
+		// 获取其类型和相应类型的处理器
 		String typeStr = sqlPart.getType();
 		SqlPartType type = SqlPartType.valueOfWithoutException(typeStr);
-		// 1.带类型的SQL成员, 可能需要JOIN处理, 加入到按类型的表缓存中, 先不生成映射键值对
-		if(typeStr != null && type != null) {
-			// 设置其映射字符串
-			this.setMapStr4BasicSqlPart(type, sqlPart);
-			// 加入SQL成员的缓存中
-			ISqlPart existSqlPart = this.joinableSqlPartMap.get(type);
-			if(existSqlPart == null) {
-				// 每种SQL成员类型只存储一个容器SQL成员, 不断往这个容器SQL成员拼接内容来完成结果生成生成
-				existSqlPart = new SqlPart(sqlPart);
-				this.allSqlParts.add(existSqlPart);
-				this.joinableSqlPartMap.put(type, existSqlPart);
-				// 这个容器SQL成员作为静态映射处理
-				SqlMapStrategy.MAP_STATIC.instance().handle(this, existSqlPart); 
-			}
-			// 被拼接的SQL成员不能是静态映射处理
-			sqlPart.setAssignedMapStr(null);
+		// 不带类型的SQL成员, 直接进行生成映射键值对的处理后加入所有缓存
+		if(typeStr == null || type == null) {
 			this.sqlMapper.map(this, sqlPart);
-			// 拼接SQL成员
-			ISqlJoinStrategy joinStrategy = existSqlPart.getUsingJoinStrategy();
-			if(joinStrategy != null) {
-				joinStrategy.handle(existSqlPart, sqlPart);
-			}
+			this.allSqlParts.add(sqlPart);
 			return;
 		}
-		// 2.不带类型的SQL成员, 直接进行生成映射键值对的处理后加入所有缓存
-		this.sqlMapper.map(this, sqlPart);
+		// 带类型的SQL成员, 根据类型定义先设置其默认映射字符串
+		this.setMapStr4BasicSqlPart(type, sqlPart);
+		// 获取拼接策略
+		ISqlJoinStrategy joinStrategy = sqlPart.getUsingJoinStrategy();
+		// 不需要拼接的直接处理完成即可
+		if(joinStrategy == null) {
+			this.sqlMapper.map(this, sqlPart);
+			this.allSqlParts.add(sqlPart);
+			return;
+		}
+		// 需要拼接的按类型加入可拼接SQL成员的缓存中
+		ISqlPart existSqlPart = this.joinableSqlPartMap.get(typeStr);
+		if(existSqlPart == null) {
+			// 每种SQL成员类型只存储一个容器SQL成员, 不断往这个容器SQL成员拼接内容来完成结果生成
+			existSqlPart = new SqlPart(sqlPart);
+			this.allSqlParts.add(existSqlPart);
+			this.joinableSqlPartMap.put(typeStr, existSqlPart);
+			// 这个容器SQL成员使用静态映射处理一次, 后续被拼接的同类SQL成员就不能进行静态映射了
+			SqlMapStrategy.MAP_STATIC.instance().handle(this, existSqlPart); 
+		}
+		// 需要被拼接的SQL成员不用静态映射了,容器SQL成员静态映射过就行
+		sqlPart.setAssignedMapStr(null);
 		this.allSqlParts.add(sqlPart);
+		// 拼接SQL成员
+		joinStrategy.joinSqlPart(existSqlPart, sqlPart);
+		// 进行其它映射处理
+		this.sqlMapper.map(this, sqlPart);
 	}
 }

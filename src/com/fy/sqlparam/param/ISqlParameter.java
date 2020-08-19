@@ -45,6 +45,17 @@ public interface ISqlParameter {
 	ISqlQuery markOrderBy(String propertyName, boolean isAsc);
 	
 	/**
+	 * 标记某个属性需要输出
+	 * 
+	 * @param propertyName 属性名称, 不能为null
+	 * @return 需要输出查询实例, 属于当前输出字段
+	 * 
+	 * @author linjie
+	 * @since 1.0.0
+	 */
+	ISqlQuery markSelect(String propertyName);
+	
+	/**
 	 * 设置查询分页
 	 * 
 	 * @param page 第几页, 不能小于1, 小于的情况下按1处理

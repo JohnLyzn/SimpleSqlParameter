@@ -30,6 +30,14 @@ import com.fy.sqlparam.util.FormatUtils;
 public class SqlParameter implements ISqlParameter {
 
 	/**
+	 * 输出查询组
+	 * 
+	 * @author linjie
+	 * @since 1.0.2
+	 */
+	private SqlQueryGroup selects = null;
+	
+	/**
 	 * 条件查询组
 	 * 
 	 * @author linjie
@@ -136,6 +144,18 @@ public class SqlParameter implements ISqlParameter {
 		this.sorts.addQuery(query);
 		return query;
 	}
+	
+	@Override
+	public ISqlQuery markSelect(String propertyName) {
+		SqlQuery query = new SqlQuery(propertyName, 
+				SqlQueryStrategy.SELECT.instance());
+		if(this.selects == null) {
+			this.selects = new SqlQueryGroup(query);
+			return query;
+		}
+		this.selects.addQuery(query);
+		return query;
+	}
 
 	@Override
 	public ISqlQuery setPagination(int page, int count, int offset) {
@@ -190,6 +210,7 @@ public class SqlParameter implements ISqlParameter {
 			this.deleteQuery(this.empty);
 		}
 		SqlMapContext mapContext = new SqlMapContext(paramContext, sqlMapper);
+		SqlParameter.handleQuery(mapContext, this.selects, false);
 		SqlParameter.handleQuery(mapContext, this.conditions, false);
 		SqlParameter.handleQuery(mapContext, this.sorts, false);
 		SqlParameter.handleQuery(mapContext, this.limit, false);
@@ -800,6 +821,25 @@ public class SqlParameter implements ISqlParameter {
 		}),
 		
 		/**
+		 * 字段输出的查询处理方案
+		 * 
+		 * @author linjie
+		 * @since 1.0.0
+		 */
+		SELECT(new ISqlQueryStrategy() {
+
+			@Override
+			public void handle(ISqlMapContext mapContext, ISqlQuery query, Object...args) {
+				StringBuilder sqlPiece = new StringBuilder();
+				sqlPiece.append(SqlQueryStrategy.generatePropertyPlaceholder(query.getPropertyName()));
+				SqlPart sqlPart = new SqlPart(SqlPartType.SELECT.name(), sqlPiece);
+				sqlPart.setUsingJoinStrategy(SqlJoinStrategy.JOIN_SELECT.instance());
+				sqlPart.setAssignedMapStr(SqlMapper.REGEXP_SELECT);
+				mapContext.addSqlPart(sqlPart);
+			}
+		}),
+		
+		/**
 		 * 排序的查询处理方案
 		 * 
 		 * @author linjie
@@ -1106,11 +1146,12 @@ public class SqlParameter implements ISqlParameter {
 		if(query == null) {
 			return;
 		}
-		// 判断是否是成组查询
+		// 判断是否是成组查询, 若不是成组查询直接让查询策略处理为SQL内容
 		if(! (query instanceof SqlQueryGroup)) {
 			query.getUsingStrategy().handle(mapContext, query);
 			return;
 		}
+		// 是成组查询
 		SqlQueryGroup queryGroup = (SqlQueryGroup) query;
 		Set<ISqlQuery> groupQueries = queryGroup.groupQueries;
 		boolean isSingleInGroup = groupQueries.size() == 1;
