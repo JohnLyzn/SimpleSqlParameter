@@ -325,7 +325,7 @@ public class SqlMapContext implements ISqlMapContext {
 
 		@Override
 		public boolean accept(String type) {
-			if(this.acceptTypes == null) {
+			if(type == null || this.acceptTypes == null) {
 				return true;
 			}
 			return acceptTypes.indexOf(type) != -1;
@@ -377,6 +377,9 @@ public class SqlMapContext implements ISqlMapContext {
 
 		@Override
 		public Object[] getArgObjs() {
+			if(this.argObjs == null) {
+				return Collections.emptyList().toArray();
+			}
 			return this.argObjs;
 		}
 	}
@@ -425,11 +428,7 @@ public class SqlMapContext implements ISqlMapContext {
 
 			@Override
 			public void formatBeforeMapping(StringBuilder rawSql, ISqlPart sqlPart) {
-				if(sqlPart == null) {
-					return;
-				}
-				SqlMapper.findAndReplaceContentByRegExpStr(rawSql,
-						SqlMapper.REGEXP_EXTRA_TABLES, ",");
+				
 			}
 		}),
 		
@@ -469,10 +468,7 @@ public class SqlMapContext implements ISqlMapContext {
 
 			@Override
 			public void formatBeforeMapping(StringBuilder rawSql, ISqlPart sqlPart) {
-				if(sqlPart == null) {
-					return;
-				}
-				sqlPart.getContent().insert(0, "ORDER BY ");
+				
 			}
 		}),
 		
@@ -490,7 +486,10 @@ public class SqlMapContext implements ISqlMapContext {
 
 			@Override
 			public void formatBeforeMapping(StringBuilder rawSql, ISqlPart sqlPart) {
-				
+				if(sqlPart == null) {
+					return;
+				}
+				sqlPart.getContent().insert(0, "ORDER BY ");
 			}
 		}),
 		
