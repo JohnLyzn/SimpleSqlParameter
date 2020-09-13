@@ -12,7 +12,7 @@ public interface ISqlMapper {
 	 * 映射SQL生成映射结果
 	 * 
 	 * @param mapContext 需要处理的映射上下文, 不能为null
-	 * @param targetSql 需要处理的目标SQL, 不能为null
+	 * @param sqlPart 需要处理的目标SQL成员, 不能为null
 	 * @return SQL映射结果, 不会为null
 	 * 
 	 * @author linjie

@@ -394,6 +394,16 @@ public class SqlParameter implements ISqlParameter {
 			}
 			return this.extras.get(name);
 		}
+		
+		@Override
+		public int hashCode() {
+			return this.content.hashCode();
+		}
+		
+		@Override
+		public String toString() {
+			return this.content.toString();
+		}
 	}
 
 	/**

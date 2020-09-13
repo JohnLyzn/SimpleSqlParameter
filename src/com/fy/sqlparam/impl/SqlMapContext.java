@@ -1,14 +1,15 @@
 package com.fy.sqlparam.impl;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.fy.sqlparam.impl.SqlMapper.SqlMapStrategy;
 import com.fy.sqlparam.impl.SqlParameter.SqlPart;
 import com.fy.sqlparam.map.ISqlJoinStrategy;
 import com.fy.sqlparam.map.ISqlMapContext;
@@ -60,7 +61,7 @@ public class SqlMapContext implements ISqlMapContext {
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	private final List<ISqlPart> allSqlParts = new LinkedList<ISqlPart>();
+	private final Set<ISqlPart> allSqlParts = new LinkedHashSet<ISqlPart>();
 	
 	/**
 	 * 当前映射上下文中包含的SQL成员表, 主要用于同类型的SQL成员拼接
@@ -68,7 +69,7 @@ public class SqlMapContext implements ISqlMapContext {
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	private final Map<String, ISqlPart> joinableSqlPartMap = new HashMap<String, ISqlPart>();
+	private final Map<String, Set<ISqlPart>> joinableSqlPartMap = new HashMap<String, Set<ISqlPart>>();
 	
 	/**
 	 * 当前映射上下文中包含的映射键值对
@@ -162,8 +163,14 @@ public class SqlMapContext implements ISqlMapContext {
 			return;
 		}
 		// 如果就在列表里, 直接删除
-		if(this.allSqlParts.indexOf(sqlPart) != -1) {
+		if(this.allSqlParts.contains(sqlPart)) {
 			this.allSqlParts.remove(sqlPart);
+		}
+		// 如果是可拼接SQL成员的一部分, 要把这部分也删除掉
+		Set<ISqlPart> joinableSqlParts = this.joinableSqlPartMap.get(sqlPart.getType());
+		if(joinableSqlParts != null 
+			&& joinableSqlParts.contains(sqlPart)) {
+			joinableSqlParts.remove(sqlPart);
 		}
 		// 如果存在由此SQL成员生成的映射键值对, 要把它删掉
 		List<ISqlMapEntry> needRemoveEntries = new LinkedList<ISqlMapEntry>();
@@ -173,28 +180,12 @@ public class SqlMapContext implements ISqlMapContext {
 			}
 		}
 		this.mapEntries.removeAll(needRemoveEntries);
-		// 如果是可拼接SQL成员的一部分, 要把这部分也删除掉
-		ISqlPart existSqlPart = this.joinableSqlPartMap.get(sqlPart.getType());
-		if(existSqlPart == null) {
-			return;
-		}
-		// 如果就是用于拼接的容器SQL成员, 直接清除掉该引用
-		if(existSqlPart.equals(sqlPart)) {
-			this.joinableSqlPartMap.remove(sqlPart.getType());
-			return;
-		}
-		// 找到相应位置的内容删除掉
-		String content = sqlPart.getContent().toString();
-		int start = existSqlPart.getContent().indexOf(content);
-		if(start == -1) {
-			return;
-		}
-		existSqlPart.getContent().delete(start, start + content.length());
 	}
 	
 	@Override
 	public List<ISqlPart> getSqlParts() {
-		return Collections.unmodifiableList(this.allSqlParts);
+		return Collections.unmodifiableList(Arrays.asList(
+				this.allSqlParts.toArray(new ISqlPart[this.allSqlParts.size()])));
 	}
 	
 	@Override
@@ -244,9 +235,9 @@ public class SqlMapContext implements ISqlMapContext {
 		// 把源SQL处理为SQL成员, 处理其中的映射字符串
 		StringBuilder target = new StringBuilder(rawSql);
 		this.addSqlPart(new SqlPart(null, target));
-		// 按SQL成员类型进行一些格式化处理
+		// 按SQL成员类型进行一些格式化和拼接处理
 		for(SqlPartType type : SqlPartType.values()) {
-			this.formatDynamicalChangeSQL(target, type,
+			this.handleDynamicalChangeSQL(target, type,
 					this.joinableSqlPartMap.get(type.name()));
 		}
 		// 对生成的映射键值对调用映射处理, 一直处理到不再可映射为止
@@ -604,6 +595,15 @@ public class SqlMapContext implements ISqlMapContext {
 
 			@Override
 			public void joinSqlPart(ISqlPart source, ISqlPart other, Object...args) {
+				StringBuilder rawSql = (StringBuilder) (args != null ? args[0] : null);
+				// 相同的连接表不重复加入
+				if(rawSql != null && rawSql.indexOf(other.getContent().toString()) != -1) {
+					return;
+				}
+				// 包括目前要拼接的也不能重复
+				if(source != null && source.getContent().indexOf(other.getContent().toString()) != -1) {
+					return;
+				}
 				SqlJoinStrategy.joinSqlParts(source, " ", other);
 			}
 
@@ -768,18 +768,35 @@ public class SqlMapContext implements ISqlMapContext {
 	}
 	
 	/**
-	 * 格式化某些会动态变化的SQL内容
+	 * 处理会动态变化的SQL内容
 	 * 
 	 * @param rawSql 需要处理的源SQL
 	 * @param type SQL内容的类型, 见{@link SqlPartType}
-	 * @param containerSqlPart 对应该类型的容器SQL成员
+	 * @param sqlParts 对应该类型的待拼接SQL成员
 	 * 
 	 * @author linjie
 	 * @since 1.0.0
 	 */
-	private void formatDynamicalChangeSQL(StringBuilder rawSql,
-			SqlPartType type, ISqlPart containerSqlPart) {
-		type.instance().formatBeforeMapping(rawSql, containerSqlPart);
+	private void handleDynamicalChangeSQL(StringBuilder rawSql,
+			SqlPartType type, Set<ISqlPart> sqlParts) {
+		if(sqlParts == null || sqlParts.isEmpty()) {
+			return;
+		}
+		// 先进行处理前的格式化
+		for(ISqlPart sqlPart : sqlParts) {
+			type.instance().formatBeforeMapping(rawSql, sqlPart);
+		}
+		// 建立一个空的SQL成员, 通过不断与第一个SQL成员合并完成拼接
+		ISqlPart source = new SqlPart(null, new StringBuilder());
+		// 根据类型设置基本映射的映射字符串
+		this.setMapStr4BasicSqlPart(type, source);
+		// 拼接SQL成员
+		for(ISqlPart sqlPart : sqlParts) {
+			ISqlJoinStrategy joinStrategy = sqlPart.getUsingJoinStrategy();
+			joinStrategy.joinSqlPart(source, sqlPart, rawSql);
+		}
+		// 触发映射处理
+		this.sqlMapper.map(this, source);
 	}
 	
 	/**
@@ -825,8 +842,6 @@ public class SqlMapContext implements ISqlMapContext {
 			this.allSqlParts.add(sqlPart);
 			return;
 		}
-		// 带类型的SQL成员, 根据类型定义先设置其默认映射字符串
-		this.setMapStr4BasicSqlPart(type, sqlPart);
 		// 获取拼接策略
 		ISqlJoinStrategy joinStrategy = sqlPart.getUsingJoinStrategy();
 		// 不需要拼接的直接处理完成即可
@@ -836,21 +851,18 @@ public class SqlMapContext implements ISqlMapContext {
 			return;
 		}
 		// 需要拼接的按类型加入可拼接SQL成员的缓存中
-		ISqlPart existSqlPart = this.joinableSqlPartMap.get(typeStr);
-		if(existSqlPart == null) {
+		Set<ISqlPart> joinableSqlParts = this.joinableSqlPartMap.get(typeStr);
+		if(joinableSqlParts == null) {
+			// 生成对应的容器
+			joinableSqlParts = new LinkedHashSet<ISqlPart>();
 			// 每种SQL成员类型只存储一个容器SQL成员, 不断往这个容器SQL成员拼接内容来完成结果生成
-			existSqlPart = new SqlPart(sqlPart);
-			this.allSqlParts.add(existSqlPart);
-			this.joinableSqlPartMap.put(typeStr, existSqlPart);
-			// 这个容器SQL成员使用静态映射处理一次, 后续被拼接的同类SQL成员就不能进行静态映射了
-			SqlMapStrategy.MAP_STATIC.instance().handle(this, existSqlPart); 
+			this.joinableSqlPartMap.put(typeStr, joinableSqlParts);
 		}
-		// 需要被拼接的SQL成员不用静态映射了,容器SQL成员静态映射过就行
-		sqlPart.setAssignedMapStr(null);
-		this.allSqlParts.add(sqlPart);
-		// 拼接SQL成员
-		joinStrategy.joinSqlPart(existSqlPart, sqlPart);
-		// 进行其它映射处理
+		// 添加到拼接池中
+		joinableSqlParts.add(sqlPart);
+		// 进行映射处理
 		this.sqlMapper.map(this, sqlPart);
+		// 添加到所有池中
+		this.allSqlParts.add(sqlPart);
 	}
 }
