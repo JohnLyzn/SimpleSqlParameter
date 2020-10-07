@@ -779,7 +779,9 @@ public class SqlMapContext implements ISqlMapContext {
 	 */
 	private void handleDynamicalChangeSQL(StringBuilder rawSql,
 			SqlPartType type, Set<ISqlPart> sqlParts) {
+		// 如果没有内容， 仅格式化
 		if(sqlParts == null || sqlParts.isEmpty()) {
+			type.instance().formatBeforeMapping(rawSql, null);
 			return;
 		}
 		// 先进行处理前的格式化
